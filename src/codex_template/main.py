@@ -5,11 +5,11 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .core.config import get_settings
+from .core.config import Settings, get_settings
 from .core.exceptions import CodexTemplateError
 
 # Configure structured logging
@@ -31,44 +31,24 @@ structlog.configure(
 )
 
 logger = structlog.get_logger()
-settings = get_settings()
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Application lifespan manager.
+def create_app(settings: Settings | None = None) -> FastAPI:
+    """Create and configure the FastAPI application."""
+    settings = settings or get_settings()
 
-    Handles startup and shutdown events for the FastAPI application.
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
+        logger.info(
+            "Starting application",
+            app_name=settings.app_name,
+            version=settings.app_version,
+        )
+        try:
+            yield
+        finally:
+            logger.info("Shutting down application")
 
-    Args:
-        app: FastAPI application instance.
-
-    Yields:
-        None
-    """
-    # Startup
-    logger.info(
-        "Starting application",
-        app_name=settings.app_name,
-        version=settings.app_version,
-    )
-
-    try:
-        # Add any startup logic here
-        # e.g., database connections, cache initialization, etc.
-        yield
-    finally:
-        # Shutdown
-        logger.info("Shutting down application")
-        # Add any cleanup logic here
-
-
-def create_app() -> FastAPI:
-    """Create and configure the FastAPI application.
-
-    Returns:
-        Configured FastAPI application.
-    """
     app = FastAPI(
         title=settings.app_name,
         description="A modern Python 3.13 service template for AI-assisted development",
@@ -78,7 +58,6 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # Add CORS middleware
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -87,12 +66,10 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Exception handlers
     @app.exception_handler(CodexTemplateError)
     async def codex_template_exception_handler(
         request, exc: CodexTemplateError
     ) -> JSONResponse:
-        """Handle custom application exceptions."""
         logger.error(
             "Application error",
             error_type=type(exc).__name__,
@@ -111,7 +88,6 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def general_exception_handler(request, exc: Exception) -> JSONResponse:
-        """Handle unexpected exceptions."""
         logger.error(
             "Unexpected error",
             error_type=type(exc).__name__,
@@ -126,14 +102,8 @@ def create_app() -> FastAPI:
             },
         )
 
-    # Health check endpoint
     @app.get("/health")
     async def health_check() -> dict[str, Any]:
-        """Health check endpoint.
-
-        Returns:
-            Health status information.
-        """
         return {
             "status": "healthy",
             "app_name": settings.app_name,
@@ -141,30 +111,18 @@ def create_app() -> FastAPI:
             "environment": settings.environment,
         }
 
-    # Root endpoint
     @app.get("/")
     async def root() -> dict[str, str]:
-        """Root endpoint.
-
-        Returns:
-            Welcome message.
-        """
         return {
             "message": f"Welcome to {settings.app_name}",
             "version": settings.app_version,
             "docs": "/docs" if settings.enable_docs else "disabled",
         }
 
-    # Include API routers here
-    # app.include_router(api_router, prefix=settings.api_v1_prefix)
-
     return app
 
 
-# Create the application instance
-app = create_app()
-
-
+# Entry point for running the application
 def main() -> None:
     """Main entry point for running the application.
 
@@ -173,8 +131,10 @@ def main() -> None:
     """
     import uvicorn
 
+    settings = get_settings()
     uvicorn.run(
-        "codex_template.main:app",
+        "codex_template.main:create_app",
+        factory=True,
         host=settings.host,
         port=settings.port,
         reload=settings.is_development,

@@ -6,16 +6,17 @@ import secrets
 import time
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, ParamSpec, TypeVar
 
 import structlog
 
 logger = structlog.get_logger()
 
-T = TypeVar("T")
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 def generate_id(prefix: str = "", length: int = 8) -> str:
@@ -53,7 +54,7 @@ def utc_now() -> datetime:
     Returns:
         Current UTC datetime.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def safe_filename(filename: str) -> str:
@@ -94,14 +95,13 @@ def ensure_directory(path: Path) -> Path:
     return path
 
 
-def retry_async(
+def retry_async[P, R](
     max_attempts: int = 3,
     delay: float = 1.0,
     backoff: float = 2.0,
     exceptions: tuple[type[Exception], ...] = (Exception,),
 ) -> Callable[
-    [Callable[..., Coroutine[Any, Any, T]]],
-    Callable[..., Coroutine[Any, Any, T]],
+    [Callable[P, Coroutine[Any, Any, R]]], Callable[P, Coroutine[Any, Any, R]]
 ]:
     """Decorator for retrying async functions with exponential backoff.
 
@@ -116,10 +116,10 @@ def retry_async(
     """
 
     def decorator(
-        func: Callable[..., Coroutine[Any, Any, T]],
-    ) -> Callable[..., Coroutine[Any, Any, T]]:
+        func: Callable[P, Coroutine[Any, Any, R]],
+    ) -> Callable[P, Coroutine[Any, Any, R]]:
         @wraps(func)
-        async def wrapper(*args: Any, **kwargs: Any) -> T:
+        async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
             current_delay = delay
             last_exception = None
 
@@ -156,7 +156,7 @@ def retry_async(
     return decorator
 
 
-def timing_decorator(func: Callable[..., T]) -> Callable[..., T]:
+def timing_decorator[P, R](func: Callable[P, R]) -> Callable[P, R]:
     """Decorator to log function execution time.
 
     Args:
@@ -167,7 +167,7 @@ def timing_decorator(func: Callable[..., T]) -> Callable[..., T]:
     """
 
     @wraps(func)
-    def sync_wrapper(*args: Any, **kwargs: Any) -> T:
+    def sync_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         start_time = time.perf_counter()
         try:
             result = func(*args, **kwargs)
@@ -189,7 +189,7 @@ def timing_decorator(func: Callable[..., T]) -> Callable[..., T]:
             raise
 
     @wraps(func)
-    async def async_wrapper(*args: Any, **kwargs: Any) -> T:
+    async def async_wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         start_time = time.perf_counter()
         try:
             result = await func(*args, **kwargs)
@@ -211,13 +211,13 @@ def timing_decorator(func: Callable[..., T]) -> Callable[..., T]:
             raise
 
     if asyncio.iscoroutinefunction(func):
-        return async_wrapper  # type: ignore
+        return async_wrapper
     else:
-        return sync_wrapper  # type: ignore
+        return sync_wrapper
 
 
 @asynccontextmanager
-async def async_timeout(seconds: float) -> AsyncGenerator[None, None]:
+async def async_timeout(seconds: float) -> AsyncGenerator[None]:
     """Async context manager for timeouts.
 
     Args:
@@ -232,7 +232,7 @@ async def async_timeout(seconds: float) -> AsyncGenerator[None, None]:
     try:
         async with asyncio.timeout(seconds):
             yield
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error("Operation timed out", timeout_seconds=seconds)
         raise
 

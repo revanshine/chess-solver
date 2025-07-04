@@ -1,10 +1,12 @@
 """Configuration management for codex_template."""
 
-from functools import lru_cache
+from __future__ import annotations
+
+import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 from pydantic_settings import BaseSettings
 
 
@@ -30,9 +32,7 @@ class Settings(BaseSettings):
     redis_url: str = Field(default="redis://localhost:6379", env="REDIS_URL")
 
     # Security settings
-    secret_key: str = Field(
-        default="dev-secret-key-change-in-production", env="SECRET_KEY"
-    )
+    secret_key: str = Field(..., env="SECRET_KEY")
     access_token_expire_minutes: int = Field(
         default=30, env="ACCESS_TOKEN_EXPIRE_MINUTES"
     )
@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     # Feature flags
     enable_docs: bool = True
     enable_metrics: bool = True
+
+    def __init__(self, **data: object) -> None:  # noqa: D401
+        """Initialize settings and ensure secret_key is provided."""
+        if "secret_key" not in data and os.getenv("SECRET_KEY") is None:
+            raise ValueError("field required")
+        super().__init__(**data)
 
     model_config = {
         "env_file": ".env",
@@ -71,15 +77,31 @@ class Settings(BaseSettings):
         return Path(__file__).parent.parent.parent.parent
 
 
-@lru_cache()
+_cached_settings: Settings | None = None
+_cached_secret_key: str | None = None
+
+
 def get_settings() -> Settings:
-    """Get cached settings instance.
+    """Return cached settings instance respecting environment changes."""
+    global _cached_settings, _cached_secret_key
 
-    Returns:
-        Settings: Application settings instance.
-    """
-    return Settings()
+    current_secret = os.getenv("SECRET_KEY")
+    if _cached_settings is None or _cached_secret_key != current_secret:
+        try:
+            _cached_settings = Settings()
+            _cached_secret_key = _cached_settings.secret_key
+        except ValidationError as exc:
+            raise ValueError("field required") from exc
+
+    assert _cached_settings is not None
+    return _cached_settings
 
 
-# Global settings instance
-settings = get_settings()
+def clear_settings_cache() -> None:
+    """Clear the cached settings instance."""
+    global _cached_settings, _cached_secret_key
+    _cached_settings = None
+    _cached_secret_key = None
+
+
+get_settings.cache_clear = clear_settings_cache  # type: ignore[attr-defined]
