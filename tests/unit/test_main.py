@@ -1,6 +1,5 @@
 """Unit tests for the main FastAPI application."""
 
-from unittest.mock import Mock
 import sys
 from pathlib import Path
 

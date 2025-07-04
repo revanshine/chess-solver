@@ -8,17 +8,18 @@ from typing import Any
 from unittest.mock import Mock
 
 import pytest
+import pytest_asyncio
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from codex_template.core.config import Settings, get_settings
+from codex_template.core.config import Settings
 from codex_template.main import create_app
 
 
 @pytest.fixture(scope="session")
-def event_loop() -> Generator[asyncio.AbstractEventLoop, None, None]:
+def event_loop() -> Generator[asyncio.AbstractEventLoop]:
     """Create an instance of the default event loop for the test session."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
@@ -41,7 +42,7 @@ def test_settings() -> Settings:
 
 
 @pytest.fixture
-def mock_settings(test_settings: Settings) -> Generator[Settings, None, None]:
+def mock_settings(test_settings: Settings) -> Generator[Settings]:
     """Mock the get_settings function with test settings."""
     import codex_template.core.config
     import codex_template.main
@@ -75,10 +76,11 @@ def client(app) -> TestClient:
     return TestClient(app)
 
 
-@pytest.fixture
-async def async_client(app) -> AsyncGenerator[AsyncClient, None]:
+@pytest_asyncio.fixture
+async def async_client(app) -> AsyncGenerator[AsyncClient]:
     """Create an async test client for the FastAPI application."""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
